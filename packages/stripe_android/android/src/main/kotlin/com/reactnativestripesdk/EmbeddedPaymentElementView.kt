@@ -398,7 +398,10 @@ class EmbeddedPaymentElementView(
     }
   }
 
+  private var lastReportedHeight: Float? = null
+
   private fun reportHeightChange(height: Float) {
+    lastReportedHeight = height
     val params =
       Arguments.createMap().apply {
         putDouble("height", height.toDouble())
@@ -408,7 +411,11 @@ class EmbeddedPaymentElementView(
 
   private fun handleConfigureResult(result: EmbeddedPaymentElement.ConfigureResult) {
     when (result) {
-      is EmbeddedPaymentElement.ConfigureResult.Succeeded -> reportHeightChange(1f)
+      // The 1dp nudge only gets a host with no height yet to lay out. Sent
+      // after a real height, it shrinks the host to 1dp, and Compose, whose
+      // own height has not changed, never reports the real one again.
+      is EmbeddedPaymentElement.ConfigureResult.Succeeded ->
+        if (lastReportedHeight == null) reportHeightChange(1f)
       is EmbeddedPaymentElement.ConfigureResult.Failed -> {
         val err = result.error
         val msg = err.localizedMessage ?: err.toString()
