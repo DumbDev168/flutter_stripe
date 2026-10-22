@@ -107,6 +107,8 @@ class StripePlugin: StripeSdkImpl, FlutterPlugin, ViewManagerDelegate {
         switch call.method {
         case "initialise":
             return initialise(call, result: result)
+        case "rememberSavedPaymentMethod":
+            return rememberSavedPaymentMethod(call, result: result)
         case "initPaymentSheet":
             return initPaymentSheet(call, result: result)
         case "confirmPaymentSheetPayment":
@@ -974,4 +976,25 @@ func RCTKeyWindow() -> UIWindow? {
         .compactMap { $0 as? UIWindowScene }
         .flatMap { $0.windows }
         .first { $0.isKeyWindow }
+}
+
+extension StripePlugin {
+    /// Stores a saved payment method as the customer's last pick, in the
+    /// SDK's own UserDefaults format. PaymentSheetLoader moves that method to
+    /// the front of the saved list, so the embedded element starts on it
+    /// instead of a remembered Apple Pay or Link pick.
+    func rememberSavedPaymentMethod(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let arguments = call.arguments as? [String: Any],
+              let customerId = arguments["customerId"] as? String,
+              let paymentMethodId = arguments["paymentMethodId"] as? String else {
+            result(FlutterError(code: "Failed", message: "customerId and paymentMethodId are required", details: nil))
+            return
+        }
+        // Mirrors UserDefaults.StripePaymentSheetKeys.customerToLastSelectedPaymentMethod.
+        let key = "com.stripe.lib:STPStripeCustomerToLastSelectedPaymentMethodKey"
+        var picks = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        picks[customerId] = paymentMethodId
+        UserDefaults.standard.set(picks, forKey: key)
+        result(nil)
+    }
 }

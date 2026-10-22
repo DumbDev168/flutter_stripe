@@ -1,5 +1,7 @@
 package com.flutter.stripe
 
+import android.content.Context
+
 import android.annotation.SuppressLint
 import androidx.annotation.NonNull
 import com.facebook.react.bridge.Promise
@@ -33,6 +35,10 @@ class StripeAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     /// This local reference serves to register the plugin with the Flutter Engine and unregister it
     /// when the Flutter Engine is detached from the Activity
     private lateinit var channel: MethodChannel
+
+    private var applicationContext: Context? = null
+
+    internal fun applicationContextOrNull(): Context? = applicationContext
     private var initializationError: String? = null
 
     lateinit var stripeSdk: StripeSdkModule
@@ -63,6 +69,7 @@ class StripeAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         DisplayMetricsHolder.initDisplayMetricsIfNotInitialized(flutterPluginBinding.applicationContext)
+        applicationContext = flutterPluginBinding.applicationContext
 
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter.stripe/payments", JSONMethodCodec.INSTANCE)
         channel.setMethodCallHandler(this)
@@ -88,6 +95,10 @@ class StripeAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
+        if (call.method == "rememberSavedPaymentMethod") {
+            rememberSavedPaymentMethod(call, result)
+            return
+        }
         if (initializationError != null || !this::stripeSdk.isInitialized) {
             result.error(
                 "flutter_stripe initialization failed",
@@ -357,6 +368,26 @@ private inline fun <reified T> MethodCall.optionalArgument(key: String): T? {
         return ReadableMap(argument<JSONObject>(key) ?: JSONObject()) as T
     }
     return value
+}
+
+/**
+ * Stores a saved payment method as the customer's last pick, in the SDK's
+ * own DefaultPrefsRepository format, so the embedded element starts on it
+ * instead of a remembered Google Pay or Link pick.
+ */
+private fun StripeAndroidPlugin.rememberSavedPaymentMethod(call: MethodCall, result: Result) {
+    val customerId = call.argument<String>("customerId")
+    val paymentMethodId = call.argument<String>("paymentMethodId")
+    val context = applicationContextOrNull()
+    if (customerId == null || paymentMethodId == null || context == null) {
+        result.error("Failed", "customerId and paymentMethodId are required", null)
+        return
+    }
+    context.getSharedPreferences("DefaultPrefsRepository", Context.MODE_PRIVATE)
+        .edit()
+        .putString("customer[$customerId]", "payment_method:$paymentMethodId:false")
+        .apply()
+    result.success(null)
 }
 
 private inline fun <reified T> MethodCall.requiredArgument(key: String): T {
