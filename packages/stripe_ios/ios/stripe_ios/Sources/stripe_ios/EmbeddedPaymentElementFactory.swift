@@ -7,14 +7,22 @@ import Stripe
 class FlutterEmbeddedPaymentElementContainerView: UIView {
     weak var channel: FlutterMethodChannel?
     weak var paymentElementView: UIView?
-    private var lastReportedHeight: CGFloat = 0
+    private(set) var lastReportedHeight: CGFloat = 0
     private var isReportingHeight = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         clipsToBounds = true
+        insetsLayoutMarginsFromSafeArea = false
     }
+
+    // The element holds a UITextView, which as a scroll view adjusts its content
+    // inset to the safe area. With the element scrolled to the bottom edge of the
+    // screen that changes its fitting height, which moves it, which changes the
+    // inset again: a layout loop that hangs the main thread. Flutter already lays
+    // the element out inside the safe area, so none of it needs to reach here.
+    override var safeAreaInsets: UIEdgeInsets { .zero }
 
     required init?(coder: NSCoder) {
         fatalError()
@@ -293,7 +301,18 @@ class FlutterEmbeddedPaymentElementDelegate: EmbeddedPaymentElementDelegate {
         // Mark layout as dirty - the container's layoutSubviews will report the height
         // No synchronous layoutIfNeeded() to avoid forcing layout passes
         DispatchQueue.main.async { [weak self] in
-            self?.containerView?.setNeedsLayout()
+            guard let container = self?.containerView else { return }
+            // The element recomputes its height on every layout pass and calls back
+            // here whenever it differs at all. A change too small to report must
+            // not schedule another pass, or the two feed each other forever.
+            let width = container.bounds.width > 0 ? container.bounds.width : embeddedPaymentElement.view.bounds.width
+            let height = embeddedPaymentElement.view.systemLayoutSizeFitting(
+                CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height
+            guard abs(height - container.lastReportedHeight) > 1.0 else { return }
+            container.setNeedsLayout()
         }
     }
 
