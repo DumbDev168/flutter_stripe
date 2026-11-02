@@ -53,6 +53,10 @@ extension StripeSdkImpl {
       return
     }
 
+    // A failed create must not leave the previous element in place: the
+    // platform view would attach it and report its rows as the new ones.
+    self.embeddedInstance = nil
+
     Task {
       do {
         let embeddedPaymentElement = try await EmbeddedPaymentElement.create(
@@ -89,7 +93,14 @@ extension StripeSdkImpl {
 
   @nonobjc
   private func emitLoadingFailed(error: Error) {
-    emitLoadingFailed(message: error.localizedDescription)
+    // localizedDescription is Stripe's generic text for an API error; the
+    // details carry its code, type and developer message.
+    var payload: [String: Any] = ["message": error.localizedDescription]
+    if let details = Errors.createError(ErrorType.Failed, error)["error"] {
+      payload["code"] = ErrorType.Failed
+      payload["details"] = details
+    }
+    self.emitter?.emitEmbeddedPaymentElementLoadingFailed(payload)
   }
 
   @nonobjc
@@ -103,7 +114,7 @@ extension StripeSdkImpl {
     case .canceled:
       resolve(["status": "canceled"])
     case .failed(let error):
-      self.emitter?.emitEmbeddedPaymentElementLoadingFailed(["message": error.localizedDescription])
+      emitLoadingFailed(error: error)
       // We don't resolve with an error b/c loading errors are handled via the embeddedPaymentElementLoadingFailed event
       resolve(nil)
     }
